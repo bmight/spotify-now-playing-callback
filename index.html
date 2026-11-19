@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- Don't send this page's address (which holds the login code) to any other site. -->
+<meta name="referrer" content="no-referrer">
+<meta name="robots" content="noindex">
+<title>Now Playing setup</title>
+<style>
+  body { font-family: system-ui, -apple-system, sans-serif; max-width: 32rem; margin: 3rem auto; padding: 0 1rem; line-height: 1.5; color: #1b1b1b; }
+  h1 { font-size: 1.4rem; margin-bottom: .5rem; }
+  #code { display: block; word-break: break-all; background: #f2f2f2; padding: .75rem; border-radius: 6px; font: .9rem ui-monospace, monospace; }
+  button { margin-top: .75rem; padding: .5rem 1rem; font: inherit; border: 1px solid #888; border-radius: 6px; background: #fff; cursor: pointer; }
+  .hidden { display: none; }
+</style>
+</head>
+<body>
+<h1 id="title">Finishing setup…</h1>
+<p id="message"></p>
+<p id="retry" class="hidden"><a id="retry-link" href="#">Send it to the display again</a></p>
+<div id="manual" class="hidden">
+  <p>If the display didn't pick this up, enter this code on it instead:</p>
+  <span id="code"></span>
+  <button id="copy" type="button">Copy code</button>
+</div>
+<noscript><p>This page needs JavaScript turned on.</p></noscript>
+
+<script>
+// Spotify redirects here after login with ?code=...&state=... (or ?error=...).
+// The display put its own local address in `state` as "<host>[:port]~<nonce>".
+// This page forwards everything to http://<host>/callback on the local network.
+(function () {
+  "use strict";
+
+  const params = new URLSearchParams(window.location.search);
+  const code = params.get("code");
+  const error = params.get("error");
+  const state = params.get("state") || "";
+  const host = state.split("~")[0];
+
+  const el = (id) => document.getElementById(id);
+  const show = (id) => el(id).classList.remove("hidden");
+
+  // Only forward to the local network (or localhost for the simulator), so a
+  // crafted link can't use this page to bounce someone to an arbitrary site.
+  function isLocalHost(value) {
+    const match = /^(localhost|\d{1,3}(?:\.\d{1,3}){3})(?::(\d{1,5}))?$/.exec(value);
+    if (!match) return false;
+
+    const port = match[2] === undefined ? 80 : Number(match[2]);
+    if (port < 1 || port > 65535) return false;
+    if (match[1] === "localhost") return true;
+
+    const o = match[1].split(".").map(Number);
+    if (o.some((n) => n > 255)) return false;
+    return o[0] === 10 ||                              // 10.0.0.0/8
+           o[0] === 127 ||                             // loopback
+           (o[0] === 172 && o[1] >= 16 && o[1] <= 31) ||  // 172.16.0.0/12
+           (o[0] === 192 && o[1] === 168);              // 192.168.0.0/16
+  }
+
+  function forward(query) {
+    const target = "http://" + host + "/callback?" + new URLSearchParams(query).toString();
+    el("retry-link").href = target;
+    show("retry");
+    // Short pause so the page is readable if the redirect fails and the user comes back.
+    setTimeout(() => { window.location.href = target; }, 1500);
+  }
+
+  const canForward = isLocalHost(host);
+
+  if (error) {
+    el("title").textContent = "Spotify login didn't finish";
+    el("message").textContent = "Spotify said: " + error + ". Start setup again from the display.";
+    if (canForward) forward({ error: error, state: state });
+    return;
+  }
+
+  if (!code) {
+    el("title").textContent = "Nothing to do here";
+    el("message").textContent = "This page finishes the Spotify login for the Now Playing display. Start setup from the display.";
+    return;
+  }
+
+  // Always show the code, so it can be entered by hand if the redirect fails.
+  el("code").textContent = code;
+  show("manual");
+  el("copy").addEventListener("click", () => {
+    navigator.clipboard.writeText(code).then(
+      () => { el("copy").textContent = "Copied"; },
+      () => { el("copy").textContent = "Copy failed: select the code instead"; }
+    );
+  });
+
+  if (canForward) {
+    el("message").textContent = "Sending you back to the display…";
+    forward({ code: code, state: state });
+  } else {
+    el("title").textContent = "Almost done";
+    el("message").textContent = "Couldn't find the display's address in this link.";
+  }
+})();
+</script>
+</body>
+</html>
